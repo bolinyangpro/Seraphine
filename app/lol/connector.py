@@ -601,16 +601,7 @@ class LolClientConnector(QObject):
         Raises:
             SummonerGamesNotFound: If the summoner games are not found.
         """
-        params = {"begIndex": begIndex, "endIndex": endIndex}
-        res = await self.__get(
-            f"/lol-match-history/v1/products/lol/{puuid}/matches", params
-        )
-        res = await res.json()
-
-        if "games" not in res:
-            raise SummonerGamesNotFound()
-
-        return res["games"]
+        return await self.__getSummonerGames(puuid, begIndex, endIndex)
 
     @retry()
     async def getSummonerGamesByPuuid(self, puuid, begIndex=0, endIndex=4):
@@ -628,6 +619,26 @@ class LolClientConnector(QObject):
         Raises:
             SummonerGamesNotFound: If the summoner games are not found.
         """
+        return await self.__getSummonerGames(puuid, begIndex, endIndex)
+
+    async def __getSummonerGames(self, puuid, begIndex, endIndex):
+        """
+        获取 [begIndex, endIndex] 区间（闭区间）内的对局记录，返回 LCU 格式
+
+        LCU 的 `/lol-match-history/v1/products/lol/{puuid}/matches` 接口现在会
+        忽略 begIndex / endIndex，永远只返回最近 20 局，导致翻页时同一批对局被反复加载。
+        因此国服优先走 SGP 接口（支持真正的分页），并把结果转换成 LCU 格式，
+        让上层的解析逻辑无需改动；SGP 不可用时回退到 LCU。
+        """
+        if self.inTencent and self.sgpSess:
+            try:
+                return await self.__getSummonerGamesViaSGPAsLcu(
+                    puuid, begIndex, endIndex)
+            except Exception:
+                logger.warning(
+                    f"get games via SGP failed, fallback to LCU\n"
+                    f"{traceback.format_exc()}", TAG)
+
         params = {"begIndex": begIndex, "endIndex": endIndex}
         res = await self.__get(
             f"/lol-match-history/v1/products/lol/{puuid}/matches", params
@@ -637,7 +648,98 @@ class LolClientConnector(QObject):
         if "games" not in res:
             raise SummonerGamesNotFound()
 
-        return res["games"]
+        res = res["games"]
+
+        # LCU 可能无视请求的区间，按实际返回的区间截取出真正请求的那一段，
+        # 超出它能返回的范围时得到空列表，避免上层把同一批对局重复加载
+        realBegin = res.get("gameIndexBegin", begIndex)
+        if realBegin != begIndex or len(res["games"]) > endIndex - begIndex + 1:
+            games = res["games"][max(begIndex - realBegin, 0):
+                                 max(endIndex - realBegin + 1, 0)]
+            res["games"] = games
+            res["gameCount"] = len(games)
+            res["gameIndexBegin"] = begIndex
+            res["gameIndexEnd"] = begIndex + len(games) - 1
+
+        return res
+
+    async def __getSummonerGamesViaSGPAsLcu(self, puuid, begIndex, endIndex):
+        res = await self.getSummonerGamesByPuuidViaSGP(
+            puuid, begIndex, endIndex)
+
+        if "games" not in res:
+            raise SummonerGamesNotFound()
+
+        games = []
+        for game in res["games"]:
+            game = self.__sgpGameToLcuGame(game["json"], puuid)
+            if game:
+                games.append(game)
+
+        return {
+            "gameCount": len(games),
+            "gameIndexBegin": begIndex,
+            "gameIndexEnd": begIndex + len(games) - 1,
+            "games": games,
+        }
+
+    @staticmethod
+    def __sgpGameToLcuGame(game, puuid):
+        """
+        把 SGP 接口返回的单局数据（`games[i]['json']`）转换成 LCU 战绩列表中的单局格式：
+        `participants` / `participantIdentities` 中只保留被查询的召唤师本人
+        """
+        p = next((x for x in game.get("participants", [])
+                  if x.get("puuid") == puuid), None)
+
+        if p is None:
+            return None
+
+        stats = dict(p)
+        try:
+            stats["perk0"] = p["perks"]["styles"][0]["selections"][0]["perk"]
+        except (KeyError, IndexError, TypeError):
+            stats["perk0"] = 0
+
+        participant = {
+            "participantId": p.get("participantId", 0),
+            "teamId": p.get("teamId", 0),
+            "championId": p.get("championId", 0),
+            "spell1Id": p.get("spell1Id", 0),
+            "spell2Id": p.get("spell2Id", 0),
+            "stats": stats,
+            "timeline": {
+                "lane": p.get("lane", "NONE"),
+                "role": p.get("role", "NONE"),
+            },
+        }
+
+        identity = {
+            "participantId": participant["participantId"],
+            "player": {
+                "puuid": puuid,
+                "gameName": p.get("riotIdGameName", ""),
+                "tagLine": p.get("riotIdTagline", ""),
+                "summonerName": p.get("summonerName", ""),
+                "summonerId": p.get("summonerId", 0),
+                "profileIcon": p.get("profileIcon", 0),
+            },
+        }
+
+        return {
+            "gameId": game["gameId"],
+            "gameCreation": game["gameCreation"],
+            "gameDuration": game["gameDuration"],
+            "gameMode": game.get("gameMode"),
+            "gameType": game.get("gameType"),
+            "gameVersion": game.get("gameVersion"),
+            "mapId": game.get("mapId"),
+            "platformId": game.get("platformId"),
+            "queueId": game["queueId"],
+            "seasonId": game.get("seasonId"),
+            "participants": [participant],
+            "participantIdentities": [identity],
+        }
 
     @retry()
     async def getGameDetailByGameId(self, gameId):
