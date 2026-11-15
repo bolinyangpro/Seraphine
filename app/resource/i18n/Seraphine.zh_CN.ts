@@ -832,6 +832,11 @@ If champions set by lane are not available, default settings will be used.</sour
         <source>)</source>
         <translation>）</translation>
     </message>
+    <message>
+        <location filename="../../view/career_interface.py" line="0"/>
+        <source>ARAM: Mayhem</source>
+        <translation>海克斯大乱斗</translation>
+    </message>
 </context>
 <context>
     <name>ChampionCountersWidget</name>
@@ -1375,6 +1380,16 @@ If champions set by lane are not available, default settings will be used.</sour
         <source>Please wait patiently</source>
         <translation type="obsolete">请耐心等待</translation>
     </message>
+    <message>
+        <location filename="../../view/search_interface.py" line="0"/>
+        <source>No more games of this mode found yet</source>
+        <translation>暂未找到更多该模式的对局</translation>
+    </message>
+    <message>
+        <location filename="../../view/search_interface.py" line="0"/>
+        <source>Searched 50 more games, click next again to keep searching</source>
+        <translation>已向前查找 50 局，再次点击下一页可继续查找</translation>
+    </message>
 </context>
 <context>
     <name>HomeInterface</name>
@@ -1739,6 +1754,11 @@ If champions set by lane are not available, default settings will be used.</sour
         <location filename="../../components/setting_cards.py" line="558"/>
         <source>Quickplay</source>
         <translation>快速匹配</translation>
+    </message>
+    <message>
+        <location filename="../../components/setting_cards.py" line="0"/>
+        <source>ARAM: Mayhem</source>
+        <translation>海克斯大乱斗</translation>
     </message>
 </context>
 <context>
@@ -2182,6 +2202,11 @@ If champions set by lane are not available, default settings will be used.</sour
         <source>Version: </source>
         <translation>游戏版本：</translation>
     </message>
+    <message>
+        <location filename="../../view/opgg_window.py" line="0"/>
+        <source>ARAM: Mayhem</source>
+        <translation>海克斯大乱斗</translation>
+    </message>
 </context>
 <context>
     <name>PathDraggableWidget</name>
@@ -2529,6 +2554,11 @@ If champions set by lane are not available, default settings will be used.</sour
         <source>Quickplay:</source>
         <translation>快速匹配：</translation>
     </message>
+    <message>
+        <location filename="../../components/setting_cards.py" line="0"/>
+        <source>ARAM: Mayhem:</source>
+        <translation>海克斯大乱斗：</translation>
+    </message>
 </context>
 <context>
     <name>RemovePrestigeCrestCard</name>
@@ -2633,6 +2663,21 @@ If champions set by lane are not available, default settings will be used.</sour
         <location filename="../../view/search_interface.py" line="1200"/>
         <source>Please check the summoner&apos;s name and retry</source>
         <translation>请检查召唤师名后重试</translation>
+    </message>
+    <message>
+        <location filename="../../view/search_interface.py" line="0"/>
+        <source>No games of this mode found</source>
+        <translation>未找到该模式的对局</translation>
+    </message>
+    <message>
+        <location filename="../../view/search_interface.py" line="0"/>
+        <source>No games of this mode in the last %d games</source>
+        <translation>最近 %d 局中没有该模式的对局</translation>
+    </message>
+    <message>
+        <location filename="../../view/search_interface.py" line="0"/>
+        <source>ARAM: Mayhem</source>
+        <translation>海克斯大乱斗</translation>
     </message>
 </context>
 <context>

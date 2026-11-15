@@ -81,6 +81,9 @@ class GamesTab(QFrame):
         # 目前已经绘制好的最大页码
         self.maxPageNum = 0
 
+        # 已经绘制到页面上的对局数量（下一页从这里接着画）
+        self.drawnCount = 0
+
         # 目前选中的 tab
         self.currentTabSelected = None
 
@@ -90,6 +93,13 @@ class GamesTab(QFrame):
         # queueId 到对应 self.games 下标数组的映射
         # OrderedDict 保证线程安全 -- By Hpero4
         self.queueIdMap = OrderedDict({-1: []})
+
+        # 按需加载：服务端是否还有更早的对局没拉下来
+        self.hasMore = False
+
+        # 按需加载的回调，由 SearchInterface 设置
+        # async def loadMore(need: int, maxBatches: int) -> None
+        self.loadMore = None
 
         self.__initWidget()
         self.__initLayout()
@@ -155,16 +165,54 @@ class GamesTab(QFrame):
 
     @asyncSlot()
     async def __onNextButtonClicked(self):
-        self.currentPageNum += 1
+        target = self.currentPageNum + 1
 
-        if self.currentPageNum > self.maxPageNum:
-            # self.games 一定足够绘制下一页，因为否则这个按钮本身就点不了
+        if target > self.maxPageNum:
+            need = self.drawnCount + 10
+
+            # 已加载的对局不够画下一页，先按需加载（单次点击最多加载 50 局）
+            if len(self.getIndicesByQueueId(self.queueId)) < need \
+                    and self.hasMore and self.loadMore:
+                self.prevButton.setEnabled(False)
+                self.nextButton.setEnabled(False)
+                await self.loadMore(need, 5)
+
+            count = len(self.getIndicesByQueueId(self.queueId))
+
+            # 只有凑满一整页，或者已经没有更多对局时才绘制，
+            # 避免画出半页之后，后续加载的对局因页码错位而显示不出来
+            if count <= self.drawnCount or (count < need and self.hasMore):
+                if self.hasMore:
+                    InfoBar.info(
+                        self.tr("No more games of this mode found yet"),
+                        self.tr("Searched 50 more games, click next again to keep searching"),
+                        orient=Qt.Vertical,
+                        duration=3000,
+                        position=InfoBarPosition.BOTTOM_RIGHT,
+                        parent=self.window())
+
+                self.resetButtonEnabled()
+                return
+
             self.prepareNextPage()
 
+        self.currentPageNum = target
         self.pageLabel.setText(f"{self.currentPageNum}")
         self.stackWidget.setCurrentIndex(self.currentPageNum)
 
         self.resetButtonEnabled()
+        self.prefetchNextPage()
+
+    def prefetchNextPage(self):
+        '''
+        在后台预取下一页需要的对局，最多请求一批（10 局），让下一次翻页不用等待
+        '''
+        if not self.hasMore or not self.loadMore:
+            return
+
+        need = self.drawnCount + 10
+        if len(self.getIndicesByQueueId(self.queueId)) < need:
+            asyncio.create_task(self.loadMore(need, 1))
 
     def showTheFirstPage(self):
         self.prepareNextPage()
@@ -178,13 +226,14 @@ class GamesTab(QFrame):
         self.pageLabel.setVisible(True)
 
         self.resetButtonEnabled()
+        self.prefetchNextPage()
 
     def resetButtonEnabled(self):
         prevEnable = not self.currentPageNum in [0, 1]
         self.prevButton.setEnabled(prevEnable)
 
-        nextEnable = len(
-            self.getIndicesByQueueId(self.queueId)) > self.currentPageNum * 10
+        nextEnable = self.currentPageNum < self.maxPageNum or self.hasMore \
+            or len(self.getIndicesByQueueId(self.queueId)) > self.drawnCount
         self.nextButton.setEnabled(nextEnable)
 
     def prepareNextPage(self):
@@ -202,7 +251,7 @@ class GamesTab(QFrame):
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        begin = self.maxPageNum * 10
+        begin = self.drawnCount
 
         # 防止能画上去的不够 10 个导致越界
         end = min(10 + begin, len(indices))
@@ -227,10 +276,12 @@ class GamesTab(QFrame):
 
         self.stackWidget.addWidget(widget)
         self.maxPageNum += 1
+        self.drawnCount = end
 
     def clearTabs(self):
         self.currentPageNum = 0
         self.maxPageNum = 0
+        self.drawnCount = 0
         self.currentTabSelected = None
 
         for i in reversed(range(len(self.stackWidget))):
@@ -251,6 +302,7 @@ class GamesTab(QFrame):
         self.queueId = -1
         self.games = []
         self.queueIdMap = {-1: []}
+        self.hasMore = False
 
         self.clearTabs()
 
@@ -1141,6 +1193,10 @@ class SearchInterface(SeraphineInterface):
 
         self.loadFirstPageLock = asyncio.Lock()
 
+        # 按需加载：下一批要请求的对局下标，以及防止并发重复请求的锁
+        self.nextGameIdx = 0
+        self.loadMoreLock = asyncio.Lock()
+
         self.__initWidget()
         self.__initLayout()
         self.__connectSignalToSlot()
@@ -1261,13 +1317,14 @@ class SearchInterface(SeraphineInterface):
                 self.gamesView.setLoadingPageEnable(False)
                 return False
 
-            self.gamesView.gamesTab.updateQueueIdMap(games)
+            tabs = self.gamesView.gamesTab
+            tabs.updateQueueIdMap(games)
 
-            # 启动任务，往 gamesTab 里丢数据
-            # NOTE 既然创建新任务, 并且刷新了self.puuid 就应该用self的, 否则就违背了loadGames判断的初衷
-
-            self.gameLoadingTask = asyncio.create_task(
-                self.__loadGames(self.puuid))
+            # 按需加载：不再在后台一直拉取到底，翻页时才请求下一批
+            self.nextGameIdx = 20
+            tabs.hasMore = len(games) >= 20
+            tabs.loadMore = lambda need, maxBatches, puuid=self.puuid: \
+                self.__loadGames(puuid, need, maxBatches)
 
         self.gamesView.gamesTab.showTheFirstPage()
         self.gamesView.setLoadingPageEnable(False)
@@ -1317,70 +1374,69 @@ class SearchInterface(SeraphineInterface):
         self.filterComboBox.setCurrentIndex(0)  # 将筛选条件回调至"全部" -- By Hpero4
         self.gamesView.gamesTab.clickFirstTab()
 
-    async def __loadGames(self, puuid):
-        begIdx = 20
-        endIdx = 29
+    async def __loadGames(self, puuid, need, maxBatches):
+        '''
+        按需加载对局：每批请求 10 局，直到当前筛选条件下已加载的对局数 >= need，
+        或服务端已没有更多对局，或本次已请求 maxBatches 批为止
 
-        logger.debug(f"welcome load games task: {puuid}", TAG)
+        以前这里是在后台一直拉取到底，一次搜索可能连续发出上百次请求
+        '''
+        async with self.loadMoreLock:
+            self.gameLoadingTask = asyncio.current_task()
+            tabs = self.gamesView.gamesTab
+            batches = 0
 
-        # NOTE 换了查询目标, 若之前正在查, 先等 task 被 release 掉 -- By Hpero4
-        while self.gameLoadingTask \
-                and not self.gameLoadingTask.done() \
-                and puuid != self.puuid:
-            await asyncio.sleep(.2)
+            while (self.puuid == puuid and tabs.hasMore and batches < maxBatches
+                   and len(tabs.getIndicesByQueueId(tabs.queueId)) < need):
+                # 为加载战绩详情让行
+                while (
+                    (self.detailViewLoadTask and not self.detailViewLoadTask.done())
+                    or
+                    (self.window().careerInterface.loadGamesTask and not self.window(
+                    ).careerInterface.loadGamesTask.done())
+                ):
+                    await asyncio.sleep(.2)
 
-        logger.debug(f"start load {puuid}", TAG)
-        # 连续查多个人时, 将前面正在查的task给release掉
-        while self.puuid == puuid:
-            # 为加载战绩详情让行
-            while (
-                (self.detailViewLoadTask and not self.detailViewLoadTask.done())
-                or
-                (self.window().careerInterface.loadGamesTask and not self.window(
-                ).careerInterface.loadGamesTask.done())
-            ):
-                await asyncio.sleep(.2)
+                begIdx = self.nextGameIdx
+                endIdx = begIdx + 9
 
-            t1 = time.time()
-            try:
-                games = await connector.getSummonerGamesByPuuidSlowly(
-                    puuid, begIdx, endIdx)
-            except SummonerGamesNotFound:
-                # TODO 这里可以弹个窗  -- By Zzaphkiel
-                # NOTE 触发 SummonerGamesNotFound 时, 异常信息会通过 connector 下发到 main_window 的 __onShowLcuConnectError
-                #  理论上会有弹框提示  -- By Hpero4
-                return
-            t2 = time.time()
+                t1 = time.time()
+                try:
+                    games = await connector.getSummonerGamesByPuuidSlowly(
+                        puuid, begIdx, endIdx)
+                except SummonerGamesNotFound:
+                    # NOTE 触发 SummonerGamesNotFound 时, 异常信息会通过 connector 下发到 main_window 的 __onShowLcuConnectError
+                    #  理论上会有弹框提示  -- By Hpero4
+                    return
+                t2 = time.time()
 
-            logger.debug(
-                f"load games {self.puuid} [{begIdx}-{endIdx}] finish {t2-t1}s", TAG)
-            # 1000 局搜完了，或者正好上一次就是最后
-            # 在切换了puuid时, 就不要再把数据刷到Games上了 -- By Hpero4
-            if games['gameCount'] == 0 or self.puuid != puuid:
-                return
+                batches += 1
+                logger.debug(
+                    f"load games {puuid} [{begIdx}-{endIdx}] finish {t2-t1}s", TAG)
 
-            # 处理数据，交给 gamesTab，更新其 games 成员以及 queueIdMap
-            games = await parseGamesDataConcurrently(games['games'])
+                # 在切换了puuid时, 就不要再把数据刷到Games上了 -- By Hpero4
+                if self.puuid != puuid:
+                    return
 
-            if self.puuid != puuid:
-                return
+                if games['gameCount'] == 0:
+                    tabs.hasMore = False
+                    break
 
-            self.gamesView.gamesTab.updateQueueIdMap(games)
+                # 处理数据，交给 gamesTab，更新其 games 成员以及 queueIdMap
+                games = await parseGamesDataConcurrently(games['games'])
 
-            # 如果用户下一页点得太猛，在还没加载完的时候点到了能绘制的最后一页
-            # 由于 __onNextButtonClicked 的逻辑，在用户进入最后一页时，nextButton 会被设置为不可用。
-            # 而现在，由于新的两页对局数据加载好了，可以绘制上去了，要让 button 变得可用
-            self.gamesView.gamesTab.resetButtonEnabled()
+                if self.puuid != puuid:
+                    return
 
-            # 如果长度小于 10，也说明搜完了已经
-            if len(games) < 10:
-                return
+                tabs.updateQueueIdMap(games)
+                self.nextGameIdx = endIdx + 1
 
-            begIdx = endIdx + 1
-            endIdx = begIdx + 9
+                # 如果长度小于 10，说明已经搜完了
+                if len(games) < 10:
+                    tabs.hasMore = False
 
-            # 睡不睡都行
-            await asyncio.sleep(.1)
+            if self.puuid == puuid:
+                tabs.resetButtonEnabled()
 
     @asyncSlot(QWidget)
     async def __onGameTabClicked(self, tab: GameTab):
@@ -1435,14 +1491,21 @@ class SearchInterface(SeraphineInterface):
 
         self.gamesView.setLoadingPageEnable(True)
 
-        while len(self.gamesView.gamesTab.getIndicesByQueueId(tabs.queueId)) < 10:
-            # 所有对局已加载完毕, 不足 10 场也直接显示 (如新模式场次较少)
-            if self.gameLoadingTask is None or self.gameLoadingTask.done():
-                break
-
-            await asyncio.sleep(.2)
+        # 按需加载出第一页（最多再往前找 50 局），不足 10 场也直接显示 (如新模式场次较少)
+        if len(tabs.getIndicesByQueueId(tabs.queueId)) < 10 \
+                and tabs.hasMore and tabs.loadMore:
+            await tabs.loadMore(10, 5)
 
         enable = len(tabs.getIndicesByQueueId(tabs.queueId)) > 0
+
+        if not enable and tabs.hasMore:
+            InfoBar.info(
+                self.tr("No games of this mode found"),
+                self.tr("No games of this mode in the last %d games") % len(tabs.games),
+                orient=Qt.Vertical,
+                duration=3000,
+                position=InfoBarPosition.BOTTOM_RIGHT,
+                parent=self.window())
         tabs.prevButton.setVisible(enable)
         tabs.nextButton.setVisible(enable)
         tabs.nextButton.setVisible(enable)
