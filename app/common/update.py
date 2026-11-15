@@ -1,7 +1,7 @@
 import subprocess
 
 bat = '''
-# Wait for Seraphine.exe to exit
+# 等待 Seraphine.exe 退出
 while ((Get-Process Seraphine -ErrorAction SilentlyContinue) -ne $null) {
     Write-Host "Seraphine is running, waiting..."
     Start-Sleep -Seconds 1
@@ -9,11 +9,11 @@ while ((Get-Process Seraphine -ErrorAction SilentlyContinue) -ne $null) {
 
 $fileList = Get-Content -Path "filelist.txt"
 
-# Iterate through the file list
+# 遍历文件列表
 foreach ($file in $fileList) {
-    # Check if the file or directory exists
+    # 检查文件或目录是否存在
     if (Test-Path -Path $file) {
-        # Delete the file or directory
+        # 删除文件或目录
         Remove-Item -Path $file -Recurse -Force
         Write-Output "Removed: $file"
     } else {
@@ -21,29 +21,29 @@ foreach ($file in $fileList) {
     }
 }
 
-# Set the source path
+# 设置源路径
 $src = "$env:AppData\\Seraphine\\temp"
 
-# Move directories
+# 移动目录
 Get-ChildItem -Path $src -Directory | ForEach-Object {
     Move-Item -Path $_.FullName -Destination '.' -Force
 }
 
-# Move files
+# 移动文件
 Get-ChildItem -Path $src -File | ForEach-Object {
     Move-Item -Path $_.FullName -Destination '.' -Force
 }
 
-# Delete the temporary folder used for update extraction
+# 删除更新解压的临时文件夹
 Remove-Item -Path $src -Recurse -Force
 
-# Start the new version of Seraphine.exe
+# 启动新版本的 Seraphine.exe
 Start-Process -FilePath ".\Seraphine.exe" -NoNewWindow
 
-# Delete the script file itself
+# 删除自身脚本文件
 Remove-Item -Path $MyInvocation.MyCommand.Definition -Force
-'''
 
+'''
 
 
 def runUpdater():

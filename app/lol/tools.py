@@ -199,7 +199,7 @@ async def parseSummonerData(summoner, rankTask, gameTask):
 
 
 async def parseGameData(game):
-    timeStamp = game["gameCreation"]  # Millisecond timestamp
+    timeStamp = game["gameCreation"]  # 毫秒级时间戳
     time = timeStampToStr(game['gameCreation'])
     shortTime = timeStampToShortStr(game['gameCreation'])
     gameId = game['gameId']
@@ -361,7 +361,7 @@ async def parseGameDetailData(puuid, game):
     for participant in game['participantIdentities']:
         participantId = participant['participantId']
         summonerName = participant['player'].get(
-            'gameName') or participant['player'].get('summonerName')  # Compatible with other regions
+            'gameName') or participant['player'].get('summonerName')  # 兼容外服
         summonerPuuid = participant['player']['puuid']
         isCurrent = (summonerPuuid == puuid)
 
@@ -505,10 +505,10 @@ async def parseGameDetailData(puuid, game):
 
 def getTeammates(game, targetPuuid):
     """
-    Get teammates of the target summoner through game information
+    通过 game 信息获取目标召唤师的队友
 
     @param game: @see connector.getGameDetailByGameId
-    @param targetPuuid: Target summoner's puuid
+    @param targetPuuid: 目标召唤师 puuid
     @return: @see res
     """
     targetParticipantId = None
@@ -526,7 +526,7 @@ def getTeammates(game, targetPuuid):
         if player['participantId'] == targetParticipantId:
             if game['queueId'] not in ARENA_QUEUE_IDS:
                 tid = player['teamId']
-            else:  # Arena mode
+            else:  # 斗魂竞技场
                 tid = player['stats']['subteamPlacement']
 
             win = player['stats']['win']
@@ -538,8 +538,8 @@ def getTeammates(game, targetPuuid):
         'queueId': game['queueId'],
         'win': win,
         'remake': remake,
-        'summoners': [],  # Teammate summoners (field name unchanged for compatibility)
-        'enemies': []  # Enemy summoners, all placed here if there are multiple teams
+        'summoners': [],  # 队友召唤师 (由于兼容性, 未修改字段名)
+        'enemies': []  # 对面召唤师, 若有多个队伍会全放这里面
     }
 
     for player in game['participants']:
@@ -557,7 +557,7 @@ def getTeammates(game, targetPuuid):
                 res['summoners'].append(
                     {'summonerId': s['summonerId'], 'name': s['summonerName'], 'puuid': s['puuid'], 'icon': s['profileIcon']})
             else:
-                # Current summoner's champion in this game, custom games don't have this field
+                # 当前召唤师在该对局使用的英雄, 自定义对局没有该字段
                 res["championId"] = player.get('championId', -1)
         else:
             res['enemies'].append(
@@ -940,7 +940,7 @@ def getAllyOrderByGameRole(session, currentSummonerId):
 
 def getTeamColor(session, currentSummonerId):
     '''
-    Input session and current summoner id, output summonerId -> color mapping
+    输入 session 以及当前召唤师 id，输出 summonerId -> 颜色的映射
     '''
     data = session['gameData']
     ally, enemy = separateTeams(data, currentSummonerId)
@@ -1108,7 +1108,7 @@ async def parseSummonerGameInfo(item, queueId, currentSummonerId):
 
 async def getSummonerGamesInfoViaSGP(item, queueID, currentSummonerId):
     '''
-    Get match history information using SGP interface
+    使用 SGP 接口取战绩信息
     '''
     puuid = item.get('puuid')
 
@@ -1164,25 +1164,47 @@ async def getSummonerGamesInfoViaSGP(item, queueID, currentSummonerId):
         getTeammatesFromSGPGame(
             game,
             puuid
-        ) for game in origGamesInfo['games'][:1]  # Avoid empty errors, check teammates (enemies) from previous game
+        ) for game in origGamesInfo['games'][:1]  # 避免空报错, 查上一局的队友(对手)
     ]
 
     recentlyChampionName = ""
     fateFlag = None
 
-    if teammatesInfo:  # Check for empty to avoid exceptions for players who haven't played for a long time or new accounts
+    if teammatesInfo:  # 判个空, 避免太久没有打游戏的玩家或新号引发异常
         if currentSummonerId in [t['summonerId'] for t in teammatesInfo[0]['summoners']]:
-            # Last game teammate
+            # 上把队友
             fateFlag = "ally"
         elif currentSummonerId in [t['summonerId'] for t in teammatesInfo[0]['enemies']]:
-            # Last game opponent
+            # 上把对面
             fateFlag = "enemy"
         recentlyChampionId = max(
-            teammatesInfo and teammatesInfo[0]['championId'], 0)  # Default to 0 if -1
+            teammatesInfo and teammatesInfo[0]['championId'], 0)  # 取不到时是-1, 如果-1置为0
         recentlyChampionName = connector.manager.champs.get(
             recentlyChampionId)
 
-    # For SGP API return value
+    # 适用于 LCU API 返回值
+    # return {
+    #     "name": summoner.get("gameName"),
+    #     'tagLine': summoner.get('tagLine'),
+    #     "icon": icon,
+    #     'championId': championId,
+    #     "level": summoner["summonerLevel"],
+    #     "rankInfo": rankInfo,
+    #     "gamesInfo": gamesInfo,
+    #     "xpSinceLastLevel": summoner["xpSinceLastLevel"],
+    #     "xpUntilNextLevel": summoner["xpUntilNextLevel"],
+    #     "puuid": puuid,
+    #     "summonerId": summoner['summonerId'],
+    #     "kda": [kill, deaths, assists],
+    #     "cellId": item.get("cellId"),
+    #     "selectedPosition": item.get("selectedPosition"),
+    #     "fateFlag": fateFlag,
+    #     "isPublic": summoner["privacy"] == "PUBLIC",
+    #     # 最近游戏的英雄 (用于上一局与与同一召唤师游玩之后显示)
+    #     "recentlyChampionName": recentlyChampionName
+    # }
+
+    # 适用于 SGP API 返回值
     return {
         "name": summonerName,
         'tagLine': tagLine,
@@ -1200,7 +1222,7 @@ async def getSummonerGamesInfoViaSGP(item, queueID, currentSummonerId):
         "selectedPosition": item.get("selectedPosition"),
         "fateFlag": fateFlag,
         "isPublic": summoner["privacy"] == "PUBLIC",
-        # Recent game champion (used to display after playing with the same summoner in the previous game)
+        # 最近游戏的英雄 (用于上一局与与同一召唤师游玩之后显示)
         "recentlyChampionName": recentlyChampionName
     }
 
@@ -1259,12 +1281,12 @@ def getTeammatesFromSGPGame(game, puuid):
 
 async def parseGamesDataFromSGP(game, puuid):
     """
-    Parse specific match record information obtained from SGP interface
+    解析由 SGP 接口得到的具体到某一局的对局记录信息
     """
 
     game = game['json']
 
-    timeStamp = game["gameCreation"]  # Millisecond timestamp
+    timeStamp = game["gameCreation"]  # 毫秒级时间戳
     time = timeStampToStr(game['gameCreation'])
     shortTime = timeStampToShortStr(game['gameCreation'])
     gameId = game['gameId']
@@ -1806,8 +1828,8 @@ async def autoShow(data, selection: ChampionSelection):
 
 async def rollAndSwapBack():
     """
-    Roll the dice and switch back to the previous champion
-    todo: interface
+    摇骰子并切换回之前的英雄
+    todo: 界面
     """
     championId = await connector.getCurrentChampion()
 

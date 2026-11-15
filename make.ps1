@@ -1,12 +1,12 @@
 <#
 .SYNOPSIS
-    This script is used to package "Seraphine".
+    该脚本用于打包 "Seraphine" 。
 
 .PARAMETER dest
-    The target output path. Default is the current directory.
+    输出的目标路径。默认为当前目录。
 
 .PARAMETER dbg
-    Whether to enable debug mode. If enabled, the `.\dist` directory will not be deleted and no 7z file will be created.
+    是否启用调试模式。如果启用，将不会删除 `.\dist` 目录，也不会创建 7z 文件。
 
 .EXAMPLE
     .\make.ps1 -dbg

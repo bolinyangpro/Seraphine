@@ -81,7 +81,7 @@ class Opgg:
 
     @alru_cache(maxsize=512)
     async def getChampionPositions(self, region, championId, tier):
-        # This call is quite fast due to caching
+        # 这个调用因为有 cache，所以还是挺快的
         data = await self.__fetchTierList(region, "ranked", tier)
 
         for item in data['data']:
@@ -96,9 +96,9 @@ class OpggDataParser:
     @staticmethod
     async def parseRankedTierList(data):
         '''
-        Original tier data for Summoner's Rift mode, returns all champions and positions together
+        召唤师峡谷模式下的原始梯队数据，是所有英雄所有位置一起返回的
 
-        In this function, separate them by lane position
+        在此函数内按照分路位置将它们分开
         '''
 
         data = data['data']
@@ -135,7 +135,7 @@ class OpggDataParser:
                     'counters': counters,
                 })
 
-        # Ranking/tier is unordered, so sort it
+        # 排名 / 梯队是乱的，所以排个序
         for tier in res.values():
             tier.sort(key=lambda x: x['rank'])
 
@@ -144,7 +144,7 @@ class OpggDataParser:
     @staticmethod
     async def parseOtherTierList(data):
         '''
-        Process original tier data for other modes
+        处理其他模式下的原始梯队数据
         '''
 
         data = data['data']
