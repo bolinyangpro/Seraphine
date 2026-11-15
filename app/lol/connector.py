@@ -601,7 +601,7 @@ class LolClientConnector(QObject):
         Raises:
             SummonerGamesNotFound: If the summoner games are not found.
         """
-        return await self.__getSummonerGames(puuid, begIndex, endIndex)
+        return await self.__getSummonerGamesViaLcu(puuid, begIndex, endIndex)
 
     @retry()
     async def getSummonerGamesByPuuid(self, puuid, begIndex=0, endIndex=4):
@@ -619,26 +619,35 @@ class LolClientConnector(QObject):
         Raises:
             SummonerGamesNotFound: If the summoner games are not found.
         """
-        return await self.__getSummonerGames(puuid, begIndex, endIndex)
+        return await self.__getSummonerGamesViaLcu(puuid, begIndex, endIndex)
 
-    async def __getSummonerGames(self, puuid, begIndex, endIndex):
+    @retry(5, 1)
+    async def getSummonerGamesByPuuidPaged(self, puuid, begIndex, endIndex):
         """
-        获取 [begIndex, endIndex] 区间（闭区间）内的对局记录，返回 LCU 格式
+        支持真正分页的对局记录查询：获取 [begIndex, endIndex] 区间（闭区间）内的对局，返回 LCU 格式
 
         LCU 的 `/lol-match-history/v1/products/lol/{puuid}/matches` 接口现在会
-        忽略 begIndex / endIndex，永远只返回最近 20 局，导致翻页时同一批对局被反复加载。
-        因此国服优先走 SGP 接口（支持真正的分页），并把结果转换成 LCU 格式，
-        让上层的解析逻辑无需改动；SGP 不可用时回退到 LCU。
+        忽略 begIndex / endIndex，永远只返回最近 20 局。
+        因此国服优先走 SGP 接口（支持真正的分页，可查到数百局之前），并把结果转换成
+        LCU 格式，让上层的解析逻辑无需改动；SGP 不可用时回退到 LCU（最多 20 局）。
+
+        NOTE 每次调用都会向腾讯服务器发出请求，注意控制调用频率
         """
         if self.inTencent and self.sgpSess:
             try:
-                return await self.__getSummonerGamesViaSGPAsLcu(
+                return await self.getSummonerGamesByPuuidViaSGPAsLcu(
                     puuid, begIndex, endIndex)
             except Exception:
                 logger.warning(
                     f"get games via SGP failed, fallback to LCU\n"
                     f"{traceback.format_exc()}", TAG)
 
+        return await self.__getSummonerGamesViaLcu(puuid, begIndex, endIndex)
+
+    async def __getSummonerGamesViaLcu(self, puuid, begIndex, endIndex):
+        """
+        通过 LCU 获取对局记录，LCU 只会返回最近 20 局
+        """
         params = {"begIndex": begIndex, "endIndex": endIndex}
         res = await self.__get(
             f"/lol-match-history/v1/products/lol/{puuid}/matches", params
@@ -663,7 +672,10 @@ class LolClientConnector(QObject):
 
         return res
 
-    async def __getSummonerGamesViaSGPAsLcu(self, puuid, begIndex, endIndex):
+    async def getSummonerGamesByPuuidViaSGPAsLcu(self, puuid, begIndex, endIndex):
+        """
+        通过 SGP 接口获取 [begIndex, endIndex] 区间内的对局记录，并转换成 LCU 格式
+        """
         res = await self.getSummonerGamesByPuuidViaSGP(
             puuid, begIndex, endIndex)
 

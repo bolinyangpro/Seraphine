@@ -37,6 +37,11 @@ from ..components.seraphine_interface import SeraphineInterface
 
 TAG = "SearchInterface"
 
+# 是否在翻页时按需加载最近 20 局之后的对局（走 connector.getSummonerGamesByPuuidPaged，
+# 即国服 SGP 分页接口，每翻一页向服务器请求一次）。
+# 目前只请求最近 20 局，置为 True 即可启用按需加载
+LOAD_MORE_GAMES = False
+
 
 def asyncLockDecorator(lockName):
     """
@@ -1321,8 +1326,9 @@ class SearchInterface(SeraphineInterface):
             tabs.updateQueueIdMap(games)
 
             # 按需加载：不再在后台一直拉取到底，翻页时才请求下一批
+            # 未启用 LOAD_MORE_GAMES 时只展示最近 20 局
             self.nextGameIdx = 20
-            tabs.hasMore = len(games) >= 20
+            tabs.hasMore = LOAD_MORE_GAMES and len(games) >= 20
             tabs.loadMore = lambda need, maxBatches, puuid=self.puuid: \
                 self.__loadGames(puuid, need, maxBatches)
 
@@ -1402,7 +1408,7 @@ class SearchInterface(SeraphineInterface):
 
                 t1 = time.time()
                 try:
-                    games = await connector.getSummonerGamesByPuuidSlowly(
+                    games = await connector.getSummonerGamesByPuuidPaged(
                         puuid, begIdx, endIdx)
                 except SummonerGamesNotFound:
                     # NOTE 触发 SummonerGamesNotFound 时, 异常信息会通过 connector 下发到 main_window 的 __onShowLcuConnectError
